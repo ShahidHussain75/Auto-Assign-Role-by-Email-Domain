@@ -39,24 +39,39 @@ function domain_registration_settings_page() {
     $domains = get_option('domain_registration_domains', array());
     ?>
     <div class="wrap">
-        <h1>Domain Registration Settings</h1>
+    <h1>Auto Assign Role by Email Domain</h1>
+    <hr />
+    <br />
+     <h2>Add New Domain Registration Rule</h2>
         <form method="post" action="">
-            <table class="form-table">
-                <tr valign="top">
-                    <th scope="row">Add Domain</th>
-                    <td>
-                        <input type="text" name="add_domain" placeholder="example.com" required />
-                        <select name="add_role">
-                            <?php wp_dropdown_roles(); ?>
-                        </select>
-                        <input type="text" name="add_expiration" id="expiration_date" placeholder="Expiration date" required />
-                        <input type="submit" class="button button-primary" value="Add" />
-                    </td>
+    
+       <table class="wp-list-table widefat fixed" style="background: transparent;">
+            <thead>
+                <tr>
+                    <th>Add Domain Name</th>
+                    <th>Select Role</th>
+                    <th>Set Expiration</th>
+                    <th>Action</th>
                 </tr>
-            </table>
+            </thead>
+            <tbody>
+                                                        <tr>
+                        <td><input type="text" name="add_domain" placeholder="example.com" required /></td>
+                        <td><select name="add_role">
+                            <?php wp_dropdown_roles(); ?>
+                        </select></td>
+                        <td><input type="text" name="add_expiration" id="expiration_date" placeholder="Expiration date" required /></td> 
+                        <td>
+                           <input type="submit" class="button button-primary" value="Add" />
+                        </td>
+                    </tr>
+                            </tbody>
+        </table>
+            
         </form>
+        <br />
         <hr />
-        <h2>Current Domains</h2>
+        <h2>Existing Domain Registration Rules</h2>
         <table class="wp-list-table widefat fixed striped">
             <thead>
                 <tr>
@@ -90,6 +105,35 @@ function domain_registration_settings_page() {
                 <?php endforeach; ?>
             </tbody>
         </table>
+        <br />
+    <h1>Instructions:</h1>
+    <ol>
+    
+    <li><p style="margin-bottom:0px; font-weight:bold;">Add New Domain Registration Rule:</p>
+    <ul>
+    <li>To add a new rule, locate the "Add New Domain Registration Rule" section above the table.</li>
+    <li>Enter the email domain for which you want to assign a specific role.</li>
+    <li>Select the desired user role from the dropdown menu.</li>
+    <li>Specify the number of days for the role assignment to expire.</li>
+    <li>Locate and click on the "Add" button after filling all the fields.</li>
+    </ul></li>
+    
+    <li><p style="margin-bottom:0px; font-weight:bold;">Existing Domain Registration Rules</p>
+    <ul>
+    <li>This section displays a table containing the existing rules for assigning user roles based on email domains.</li>
+    <li>Locate the "Delete" button under action column to delete previously added rule.</li>
+    </ul></li>
+    
+    <li><p style="margin-bottom:0px; font-weight:bold;">Existing Domain Registration Rules</p>
+    <ul>
+    <li>This section displays a table containing the existing rules for assigning user roles based on email domains.</li>
+    <li>Locate the "Delete" button under action column to delete previously added rule.</li>
+    </ul></li>
+    
+    <li><p style="margin-bottom:0px; font-weight:bold;">Restrict registration to specific domain names:</p>
+    <ul><li>Users with the added domain name specified in the rule will be allowed to register on the website.</li><li>All other domain registrations will be prohibited. Only users with the specified domain name will be able to successfully register.</li></ul>
+    </li>
+    </ol>
     </div>
     <script>
         jQuery(document).ready(function($) {
@@ -151,6 +195,30 @@ function update_existing_users_role_by_domain($domain, $role, $expiration) {
     }
 }
 
+// Schedule cron job on plugin activation
+register_activation_hook(__FILE__, 'domain_registration_schedule_cron');
+
+function domain_registration_schedule_cron() {
+    if (!wp_next_scheduled('domain_registration_check_expiration')) {
+        wp_schedule_event(time(), 'daily', 'domain_registration_check_expiration');
+    }
+}
+
+// Hook the cron job callback function
+add_action('domain_registration_check_expiration', 'domain_registration_check_expiration_callback');
+
+function domain_registration_check_expiration_callback() {
+    // Check for expired rules and update user roles
+    check_user_role_expiration();
+}
+
+// Remove cron job on plugin deactivation
+register_deactivation_hook(__FILE__, 'domain_registration_remove_cron');
+
+function domain_registration_remove_cron() {
+    wp_clear_scheduled_hook('domain_registration_check_expiration');
+}
+
 // Delete domain
 function domain_registration_delete() {
     if (isset($_POST['delete_domain'])) {
@@ -164,16 +232,35 @@ function domain_registration_delete() {
     }
 }
 
-// Change role to subscriber by domain
+// Change role to "Subscriber" for users with a specific domain
 function change_role_to_subscriber_by_domain($domain) {
     $users = get_users();
     foreach ($users as $user) {
         $user_email_domain = substr(strrchr($user->user_email, "@"), 1);
         if ($user_email_domain === $domain) {
             $user->set_role('subscriber');
+            delete_user_meta($user->ID, 'domain_registration_expiration');
         }
     }
 }
+
+// Check expiration and update user role
+add_action('wp_loaded', 'check_user_role_expiration');
+
+function check_user_role_expiration() {
+    $domains = get_option('domain_registration_domains', array());
+
+    foreach ($domains as $domain => $data) {
+        $expiration_date = strtotime($data['expiration']);
+
+        if (time() > $expiration_date) {
+            change_role_to_subscriber_by_domain($domain);
+            unset($domains[$domain]);
+            update_option('domain_registration_domains', $domains);
+        }
+    }
+}
+
 
 // Restrict registration to specific domain names start
 add_action('registration_errors', 'domain_registration_restrict_registration', 10, 3);
